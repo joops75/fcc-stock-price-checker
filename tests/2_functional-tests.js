@@ -11,6 +11,7 @@ const chai = require('chai');
 const assert = chai.assert;
 const mongoose = require('mongoose');
 const server = require('../server');
+// use puppeteer as jQuery function in index.html needs to be triggered and handled to deal with simultaneous stock requests
 const puppeteer = require('puppeteer');
 require('dotenv').config();
 
@@ -18,127 +19,100 @@ chai.use(chaiHttp);
 
 let browser;
 let page;
+let stock;
+let stock1;
+let stock2;
+let re;
+// standard call-frequency limit of Alpha Vanatge is 5 requests per minute
+const waitBetweenTests = 30000;
+const numberOfAPICalls = 5;
+
+function oneStockRe(stk, like) {
+  return new RegExp('^{"stockData":{"stock":"' + stk +'","price":"\\d+\\.?\\d+","likes":' + like +'}}$');
+}
+
+function twoStocksRe(stk1, stk2, like1, like2) {
+  return new RegExp('^{"stockData":\\[{"stock":"' + stk1 +'","price":"\\d+\\.?\\d+","rel_likes":' + like1 +'},{"stock":"' + stk2 +'","price":"\\d+\\.?\\d+","rel_likes":' + like2 +'}]}$');
+}
 
 suite('Functional Tests', function() {
 
-  this.timeout(10000);
-
-  suiteSetup(done => {
-    mongoose.connection.dropDatabase()
-      .then(() => done())
-      .catch(err => { throw err; })
+  this.timeout(numberOfAPICalls * waitBetweenTests);
+    
+  suiteSetup(async () => {
+    await mongoose.connection.dropDatabase()
+    browser = await puppeteer.launch({
+      headless: true // default is true
+    });
+    page = await browser.newPage();
+    await page.goto(process.env.HOME_PAGE);
   });
 
-    suite('GET /api/stock-prices => stockData object. Get 2 stocks.', function() {
+  suiteTeardown(async () => {
+    await page.close();
+    await browser.close();
+  });
 
-      this.timeout(10000);
-      
-      suiteSetup(async function() {
-        browser = await puppeteer.launch({
-          headless: true // default is true
-        })
-      });
+    suite('GET /api/stock-prices => stockData object', () => {
 
-      setup(async function() {
-        page = await browser.newPage();
-        await page.goto(process.env.HOME_PAGE);
-      });
-
-      teardown(async function() {
-        await page.close();
-      });
-
-      suiteTeardown(async () => {
-        await browser.close();
-      });
-
-      test('2 stocks', async function() {// use puppeteer as jQuery function in index.html needs to be triggered to handle multiple stocks
-        const stock1 = 'GOOG';
-        const stock2 = 'MSFT';
-        await page.type('#stock1Input', stock1);
-        await page.type('#stock2Input', stock2);
-        await Promise.all([
-          page.waitFor(2000),
-          page.click('#testFormSubmit')
-        ])
+      test('1 stock', async () => {
+        stock = 'GOOG';
+        await page.type('input[name=stock]', stock);
+        await page.click('button[type=submit]', { delay: 100 });
+        await page.waitFor(waitBetweenTests);
         const serverResponseText = await page.$eval('code#jsonResult', el => el.innerHTML);
-        const re = new RegExp('^{"stockData":\\[{"stock":"' + stock1 +'","price":"\\d+\\.?\\d+","rel_likes":0},{"stock":"' + stock2 +'","price":"\\d+\\.?\\d+","rel_likes":0}]}$')
+        re = oneStockRe(stock, 0);
         assert.isTrue(re.test(serverResponseText));
       });
       
-      test('2 stocks with like', async function() {
-        const stock1 = 'A';
-        const stock2 = 'AA';
-        await page.type('#stock1Input', stock1);
-        await page.type('#stock2Input', stock2);
-        await Promise.all([
-          page.waitFor(2000),
-          page.click('#doubleLikeCheckbox'),
-          page.click('#testFormSubmit', { delay: 100 })// use delay or else sometimes checkbox click doesn't register first
-        ])
+      test('1 stock with like', async () => {
+        await page.click('input[type=checkbox]');
+        await page.click('button[type=submit]', { delay: 100 });
+        await page.waitFor(waitBetweenTests);
         const serverResponseText = await page.$eval('code#jsonResult', el => el.innerHTML);
-        const re = new RegExp('^{"stockData":\\[{"stock":"' + stock1 +'","price":"\\d+\\.?\\d+","rel_likes":0},{"stock":"' + stock2 +'","price":"\\d+\\.?\\d+","rel_likes":0}]}$')
+        re = oneStockRe(stock, 1);
         assert.isTrue(re.test(serverResponseText));
       });
       
-    });
-    
-    suite('GET /api/stock-prices => stockData object. Get 1 stock.', function() {
-      
-      test('1 stock', function(done) {
-       chai.request(server)
-        .get('/api/stock-prices')
-        .query({ stock: 'goog' })
-        .end(function(err, { status, body }){
-          const { stockData } = body;
-          assert.equal(status, 200);
-          assert.hasAllKeys(body, ['stockData']);
-          assert.hasAllKeys(stockData, ['stock', 'price', 'likes']);
-          assert.equal(stockData.stock, 'GOOG');
-          assert.isString(stockData.price);
-          assert.strictEqual(stockData.likes, 0);
-          done();
-        });
+      test('1 stock with like again (ensure likes arent double counted)', async () => {
+        await page.click('button[type=submit]', { delay: 100 });
+        await page.waitFor(waitBetweenTests);
+        const serverResponseText = await page.$eval('code#jsonResult', el => el.innerHTML);
+        re = oneStockRe(stock, 1);
+        assert.isTrue(re.test(serverResponseText));
       });
       
-      test('1 stock with like', function(done) {
-        chai.request(server)
-          .get('/api/stock-prices')
-          .query({
-            stock: 'msft',
-            like: true
-          })
-          .end((err, { status, body }) => {
-            const { stockData } = body;
-            assert.equal(status, 200);
-            assert.hasAllKeys(body, ['stockData']);
-            assert.hasAllKeys(stockData, ['stock', 'price', 'likes']);
-            assert.equal(stockData.stock, 'MSFT');
-            assert.isString(stockData.price);
-            assert.strictEqual(stockData.likes, 1);
-            done();
-          });
+      test('2 stocks', async () => {
+        stock1 = 'A';
+        stock2 = 'AA';
+        await page.type('#stock1Input', stock1);
+        await page.type('#stock2Input', stock2);
+        await page.click('#testFormSubmit', { delay: 100 });
+        await page.waitFor(waitBetweenTests);
+        const serverResponseText = await page.$eval('code#jsonResult', el => el.innerHTML);
+        re = twoStocksRe(stock1, stock2, 0, 0);
+        assert.isTrue(re.test(serverResponseText));
       });
       
-      test('1 stock with like again (ensure likes arent double counted)', function(done) {
-        chai.request(server)
-          .get('/api/stock-prices')
-          .query({
-            stock: 'msft',
-            like: true
-          })
-          .end((err, { status, body }) => {
-            const { stockData } = body;
-            assert.equal(status, 200);
-            assert.hasAllKeys(body, ['stockData']);
-            assert.hasAllKeys(stockData, ['stock', 'price', 'likes']);
-            assert.equal(stockData.stock, 'MSFT');
-            assert.isString(stockData.price);
-            assert.strictEqual(stockData.likes, 1);
-            done();
-          });
+      test('2 stocks with like', async () => {
+        await page.focus('#stock1Input');
+        for (let i = 0; i < stock1.length; i ++)
+          await page.keyboard.press('Backspace');
+        await page.focus('#stock2Input');
+        for (let i = 0; i < stock2.length; i ++)
+          await page.keyboard.press('Backspace');
+        stock1 = 'GOOG';
+        stock2 = 'MSFT';
+        await page.type('#stock1Input', stock1);
+        await page.type('#stock2Input', stock2);
+        await page.click('#doubleLikeCheckbox');
+        await page.click('#testFormSubmit', { delay: 100 });
+        await page.waitFor(2000);
+        const serverResponseText = await page.$eval('code#jsonResult', el => el.innerHTML);
+        re = twoStocksRe(stock1, stock2, 0, 0);
+        assert.isTrue(re.test(serverResponseText));
       });
-       
-    });
+     
+  });
 
 });
