@@ -18,7 +18,16 @@ const app = express();
 
 mongoose.connect(process.env.MONGO_URL, { useNewUrlParser: true });
 
-app.use(helmet.contentSecurityPolicy({ directives: { scriptSrc: ["'self"] } }));
+if (process.env.NODE_ENV !== 'test') {
+  // contentSecurityPolicy can't be used with tests or puppeteer won't function with them
+  // puppeteer is required to deal with simultaneous stock requests
+  app.use(helmet.contentSecurityPolicy({
+    directives: {
+      defaultSrc: ["'self'"],
+      styleSrc: ["'self'"]
+    }
+  }));
+}
 
 app.use('/public', express.static(process.cwd() + '/public'));
 
