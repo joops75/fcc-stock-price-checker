@@ -11,7 +11,7 @@ const chai = require('chai');
 const assert = chai.assert;
 const mongoose = require('mongoose');
 const server = require('../server');
-// use puppeteer as jQuery function in index.html needs to be triggered and handled to deal with simultaneous stock requests
+// use puppeteer instead of zombie as jQuery function in index.html needs to be triggered and handled to deal with simultaneous stock requests
 const puppeteer = require('puppeteer');
 require('dotenv').config();
 
