@@ -18,16 +18,21 @@ const app = express();
 
 mongoose.connect(process.env.MONGO_URL, { useNewUrlParser: true });
 
-if (process.env.NODE_ENV !== 'test') {
-  // contentSecurityPolicy can't be used with tests or puppeteer won't function with them
-  // puppeteer is required to deal with simultaneous stock requests
-  app.use(helmet.contentSecurityPolicy({
-    directives: {
-      defaultSrc: ["'self'"],
-      styleSrc: ["'self'"]
-    }
-  }));
-}
+// required contentSecurityPolicy can't be used or else page won't function
+// app.use(helmet.contentSecurityPolicy({
+//   directives: {
+//     defaultSrc: ["'self'"],
+//     styleSrc: ["'self'"]
+//   }
+// }));
+
+app.use(helmet.contentSecurityPolicy({
+  directives: {
+    defaultSrc: ["'self'", 'https://hyperdev.com', 'http://glitch.com'],
+    scriptSrc: ["'self'", "'unsafe-inline'", 'https://code.jquery.com'],
+    styleSrc: ["'self'", "'unsafe-inline'"]
+  }
+}));
 
 app.use('/public', express.static(process.cwd() + '/public'));
 
